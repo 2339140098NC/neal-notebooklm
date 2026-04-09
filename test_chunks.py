@@ -1,6 +1,6 @@
 import fitz
 
-doc = fitz.open("test.pdf")
+doc = fitz.open("A History of Japan.pdf")
 
 #Get all the text from every page
 full_text = ""
