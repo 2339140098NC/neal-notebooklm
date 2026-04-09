@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PDF RAG Assistant</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f4f6f9;
+      color: #1a1a2e;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 2rem 1rem;
+    }
+
+    h1 {
+      font-size: 1.75rem;
+      font-weight: 700;
+      margin-bottom: 0.25rem;
+    }
+
+    .subtitle {
+      color: #666;
+      margin-bottom: 2rem;
+      font-size: 0.95rem;
+    }
+
+    .card {
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+      padding: 1.5rem;
+      width: 100%;
+      max-width: 680px;
+      margin-bottom: 1.5rem;
+    }
+
+    .card h2 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 1rem;
+      color: #444;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    /* Upload area */
+    .drop-zone {
+      border: 2px dashed #c8d0e0;
+      border-radius: 8px;
+      padding: 2rem;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+      position: relative;
+    }
+
+    .drop-zone.drag-over {
+      border-color: #4f8ef7;
+      background: #f0f5ff;
+    }
+
+    .drop-zone input[type="file"] {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      cursor: pointer;
+    }
+
+    .drop-zone .icon {
+      font-size: 2rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .drop-zone p {
+      color: #666;
+      font-size: 0.9rem;
+    }
+
+    .drop-zone .filename {
+      margin-top: 0.5rem;
+      font-weight: 600;
+      color: #4f8ef7;
+      font-size: 0.9rem;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.55rem 1.2rem;
+      border-radius: 7px;
+      border: none;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.2s, transform 0.1s;
+    }
+
+    .btn:active { transform: scale(0.98); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .btn-primary {
+      background: #4f8ef7;
+      color: #fff;
+      margin-top: 1rem;
+    }
+
+    .btn-primary:hover:not(:disabled) { opacity: 0.88; }
+
+    /* Ask area */
+    .ask-row {
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    .ask-row input {
+      flex: 1;
+      padding: 0.6rem 0.9rem;
+      border: 1.5px solid #d0d7e3;
+      border-radius: 7px;
+      font-size: 0.95rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    .ask-row input:focus { border-color: #4f8ef7; }
+
+    /* Status / answer */
+    .status {
+      margin-top: 0.9rem;
+      font-size: 0.875rem;
+      min-height: 1.2em;
+    }
+
+    .status.success { color: #2a9d5c; }
+    .status.error   { color: #e24d4d; }
+    .status.loading { color: #888; }
+
+    .answer-box {
+      margin-top: 1rem;
+      background: #f7f9fc;
+      border-left: 3px solid #4f8ef7;
+      border-radius: 0 6px 6px 0;
+      padding: 0.9rem 1rem;
+      font-size: 0.93rem;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      display: none;
+    }
+
+    /* Spinner */
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border: 2px solid currentColor;
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>PDF RAG Assistant</h1>
+  <p class="subtitle">Upload a PDF, then ask questions about its content.</p>
+
+  <!-- Upload card -->
+  <div class="card">
+    <h2>1 — Upload PDF</h2>
+    <div class="drop-zone" id="dropZone">
+      <input type="file" id="fileInput" accept=".pdf" />
+      <div class="icon">📄</div>
+      <p>Drag & drop a PDF here, or click to browse</p>
+      <div class="filename" id="fileName"></div>
+    </div>
+    <button class="btn btn-primary" id="uploadBtn" disabled>Upload</button>
+    <div class="status" id="uploadStatus"></div>
+  </div>
+
+  <!-- Ask card -->
+  <div class="card">
+    <h2>2 — Ask a Question</h2>
+    <div class="ask-row">
+      <input
+        type="text"
+        id="questionInput"
+        placeholder="e.g. What are the main topics covered?"
+      />
+      <button class="btn btn-primary" id="askBtn">Ask</button>
+    </div>
+    <div class="status" id="askStatus"></div>
+    <div class="answer-box" id="answerBox"></div>
+  </div>
+
+  <script>
+    const API_BASE = "http://127.0.0.1:8000";
+
+    /* ── Upload logic ── */
+    const dropZone     = document.getElementById("dropZone");
+    const fileInput    = document.getElementById("fileInput");
+    const fileNameEl   = document.getElementById("fileName");
+    const uploadBtn    = document.getElementById("uploadBtn");
+    const uploadStatus = document.getElementById("uploadStatus");
+
+    let selectedFile = null;
+
+    function setFile(file) {
+      if (!file || file.type !== "application/pdf") {
+        setStatus(uploadStatus, "Please select a valid PDF file.", "error");
+        return;
+      }
+      selectedFile = file;
+      fileNameEl.textContent = file.name;
+      uploadBtn.disabled = false;
+      uploadStatus.textContent = "";
+    }
+
+    fileInput.addEventListener("change", () => setFile(fileInput.files[0]));
+
+    dropZone.addEventListener("dragover", e => {
+      e.preventDefault();
+      dropZone.classList.add("drag-over");
+    });
+    dropZone.addEventListener("dragleave", () => dropZone.classList.remove("drag-over"));
+    dropZone.addEventListener("drop", e => {
+      e.preventDefault();
+      dropZone.classList.remove("drag-over");
+      setFile(e.dataTransfer.files[0]);
+    });
+
+    uploadBtn.addEventListener("click", async () => {
+      if (!selectedFile) return;
+      uploadBtn.disabled = true;
+      setStatus(uploadStatus, "Uploading and processing…", "loading", true);
+
+      const form = new FormData();
+      form.append("file", selectedFile);
+
+      try {
+        const res = await fetch(`${API_BASE}/upload`, { method: "POST", body: form });
+        const data = await res.json();
+        if (res.ok) {
+          setStatus(uploadStatus, data.message || "Upload successful!", "success");
+        } else {
+          setStatus(uploadStatus, data.detail || "Upload failed.", "error");
+        }
+      } catch (err) {
+        setStatus(uploadStatus, "Could not reach the server. Is it running?", "error");
+      } finally {
+        uploadBtn.disabled = false;
+      }
+    });
+
+    /* ── Ask logic ── */
+    const questionInput = document.getElementById("questionInput");
+    const askBtn        = document.getElementById("askBtn");
+    const askStatus     = document.getElementById("askStatus");
+    const answerBox     = document.getElementById("answerBox");
+
+    askBtn.addEventListener("click", askQuestion);
+    questionInput.addEventListener("keydown", e => { if (e.key === "Enter") askQuestion(); });
+
+    async function askQuestion() {
+      const q = questionInput.value.trim();
+      if (!q) return;
+
+      askBtn.disabled = true;
+      answerBox.style.display = "none";
+      setStatus(askStatus, "Thinking…", "loading", true);
+
+      try {
+        const url = `${API_BASE}/ask?question=${encodeURIComponent(q)}`;
+        const res = await fetch(url, { method: "POST" });
+        const data = await res.json();
+        if (res.ok) {
+          askStatus.textContent = "";
+          answerBox.textContent = data.answer;
+          answerBox.style.display = "block";
+        } else {
+          setStatus(askStatus, data.detail || "Request failed.", "error");
+        }
+      } catch (err) {
+        setStatus(askStatus, "Could not reach the server. Is it running?", "error");
+      } finally {
+        askBtn.disabled = false;
+      }
+    }
+
+    /* ── Helper ── */
+    function setStatus(el, msg, type, spinner = false) {
+      el.className = `status ${type}`;
+      el.innerHTML = spinner
+        ? `<span class="spinner"></span> ${msg}`
+        : msg;
+    }
+  </script>
+</body>
+</html>
