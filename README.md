@@ -42,4 +42,3 @@ A PDF question-answering tool powered by Retrieval-Augmented Generation. Upload 
 - Add a `source` column to track which PDF each chunk came from
 - Smarter chunking (split at sentence boundaries instead of fixed length)
 - Filter search results by specific document
-- Add a frontend UI
