@@ -2,6 +2,8 @@
 
 A PDF question-answering tool powered by Retrieval-Augmented Generation. Upload any PDF, ask questions, and get answers based on the document content.
 
+![Demo](<I (1).gif>)
+
 ## How It Works
 
 1. Upload a PDF → text is extracted and split into chunks
