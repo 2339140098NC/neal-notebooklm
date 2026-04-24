@@ -77,19 +77,28 @@ async def ask_question(question:str):
         query_name="match_documents"
     )
 
+        # DEBUG: see what chunks are being retrieved
+    docs = vectorstore.similarity_search(question, k=10)
+    print(f"Found {len(docs)} chunks")
+    for doc in docs:
+        print(doc.page_content[:100])
+
     prompt = PromptTemplate(
     input_variables=["context", "question"],
-    template="""Answer ONLY based on the context below. 
-    If the answer is not in the context, say 'I don't have that information.'
+    template="""Use the following context to answer the question. 
+        If the answer is not in the context, say 'I don't have that information.'
 
-    Context: {context}
-    Question: {question}
-    Answer:"""
+        Context:
+        {context}
+
+        Question: {question}
+        Answer:"""
     )
 
     qa_chain = RetrievalQA.from_chain_type(
         llm=ChatOpenAI(model="gpt-4o-mini", temperature=0),
-        retriever=vectorstore.as_retriever(search_kwargs={"k": 5}),
+        chain_type="stuff",
+        retriever=vectorstore.as_retriever(search_kwargs={"k": 10}),
         chain_type_kwargs={"prompt": prompt}
     )
 
