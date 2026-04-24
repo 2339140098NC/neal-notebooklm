@@ -6,9 +6,13 @@ from fastapi import FastAPI, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 import fitz
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings
 from langchain_community.vectorstores import SupabaseVectorStore
+from langchain_classic.chains import RetrievalQA
+from langchain_openai import ChatOpenAI
+from langchain_core.prompts import PromptTemplate
+
 
 load_dotenv()
 
@@ -47,41 +51,47 @@ async def upload_pdf(file: UploadFile):
     chunks = splitter.create_documents([full_text])
 
     #Embed + Store
-    vectorstore = SupabaseVectorStore.from_documents(
-        chunks,
-        embedding=OpenAIEmbeddings(model="text-embedding-3-small"),
-        client=supabase,
-        table_name="documents",
-        query_name="match_documents"
-    )
+    #Embed + Store in batches
+    embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+    batch_size = 50
+
+    for i in range(0, len(chunks), batch_size):
+        batch = chunks[i:i + batch_size]
+        SupabaseVectorStore.from_documents(
+            batch,
+            embedding=embeddings,
+            client=supabase,
+            table_name="documents",
+            query_name="match_documents"
+        )
+        print(f"Stored batch {i//batch_size + 1}")
+
     return {"message": f"Stored {len(chunks)} chunks"}
 
 @app.post("/ask")
-async def ask_question(question: str):
-    #Embed question
-    q_response = openai_client.embeddings.create(
-        model="text-embedding-3-small",
-        input=question
+async def ask_question(question:str):
+    vectorstore = SupabaseVectorStore(
+        client=supabase,
+        embedding=OpenAIEmbeddings(model="text-embedding-3-small"),
+        table_name = "documents",
+        query_name="match_documents"
     )
 
-    q_vector = q_response.data[0].embedding
+    prompt = PromptTemplate(
+    input_variables=["context", "question"],
+    template="""Answer ONLY based on the context below. 
+    If the answer is not in the context, say 'I don't have that information.'
 
-    #Search
-    results = supabase.rpc("match_documents",{
-        "query_embedding": q_vector,
-        "match_count":5
-    }).execute()
-
-    chunks = [r["content"] for r in results.data]
-    context= "\n\n".join(chunks)
-
-    #Send chunks + question to AI
-    response = openai_client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages = [
-            {"role": "system", "content": f"Answer ONLY based on this context. If the answer is not in the context, say 'I don't have that information.'\n\n{context}"},
-            {"role":"user", "content": question}
-        ]
+    Context: {context}
+    Question: {question}
+    Answer:"""
     )
 
-    return {"answer": response.choices[0].message.content}
+    qa_chain = RetrievalQA.from_chain_type(
+        llm=ChatOpenAI(model="gpt-4o-mini", temperature=0),
+        retriever=vectorstore.as_retriever(search_kwargs={"k": 5}),
+        chain_type_kwargs={"prompt": prompt}
+    )
+
+    result = qa_chain.invoke({"query":question})
+    return {"answer": result["result"]}
