@@ -6,6 +6,9 @@ from fastapi import FastAPI, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 import fitz
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_openai import OpenAIEmbeddings
+from langchain_community.vectorstores import SupabaseVectorStore
 
 load_dotenv()
 
@@ -16,7 +19,6 @@ supabase = create_client(
 )
 
 app = FastAPI()
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -38,24 +40,20 @@ async def upload_pdf(file: UploadFile):
         full_text += page.get_text()
     
     #Chunk
-    chunk_size = 500
-    chunks = []
-    for i in range(0, len(full_text), chunk_size):
-        chunks.append(full_text[i:i + chunk_size])
-
-    #Embed
-    response = openai_client.embeddings.create(
-        model="text-embedding-3-small",
-        input=chunks
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=500,
+        chunk_overlap=50 #repeat 50 chars between chunks so nothing gets cut off
     )
+    chunks = splitter.create_documents([full_text])
 
-    #Store
-    for i,chunk in enumerate(chunks):
-        supabase.table("documents").insert({
-            "content": chunk,
-            "embedding": response.data[i].embedding
-        }).execute()
-
+    #Embed + Store
+    vectorstore = SupabaseVectorStore.from_documents(
+        chunks,
+        embedding=OpenAIEmbeddings(model="text-embedding-3-small"),
+        client=supabase,
+        table_name="documents",
+        query_name="match_documents"
+    )
     return {"message": f"Stored {len(chunks)} chunks"}
 
 @app.post("/ask")
